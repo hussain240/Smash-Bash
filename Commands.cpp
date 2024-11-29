@@ -249,15 +249,15 @@ void KillCommand::execute() {
         perror("smash error: kill: invalid arguments");
         return;
     }
-    if(jobsPtr->jobs.size()==0)
-    {
-        std::cerr << "smash error: kill: job-id " << words[2] << " does not exist" << std::endl;
-        return;
-    }
     int id= stringToInt(words[2]);
     if(id==-1)
     {
         perror("smash error: kill: invalid arguments");
+        return;
+    }
+    if(jobsPtr->jobs.size()==0)
+    {
+        std::cerr << "smash error: kill: job-id " << id << " does not exist" << std::endl;
         return;
     }
     for(auto job : jobsPtr->jobs)
@@ -273,7 +273,7 @@ void KillCommand::execute() {
             return;
         }
     }
-    std::cerr << "smash error: kill: job-id " << words[2] << " does not exist" << std::endl;
+    std::cerr << "smash error: kill: job-id " << id << " does not exist" << std::endl;
 
 
 }
@@ -493,6 +493,6 @@ void ForegroundCommand::execute() {
             return;
         }
     }
-    std::cerr << "smash error: fg: job-id " << words[1] << " does not exist" << std::endl;
+    std::cerr << "smash error: fg: job-id " << num << " does not exist" << std::endl;
 
 }
