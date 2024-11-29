@@ -142,7 +142,12 @@ Command *SmallShell::CreateCommand(const string cmd_line) {
         return new JobsCommand(cmd_line,shellJobsPtr);
     }else if (words[0].compare("quit") == 0){
         return new QuitCommand(cmd_line,shellJobsPtr);
-    }else {
+    }else if(words[0].compare("fg")==0){
+        return new ForegroundCommand(cmd_line,shellJobsPtr);
+    }else if(words[0].compare("kill")==0){
+        return new KillCommand(cmd_line,shellJobsPtr);
+    }
+    else {
         cout << "\033[35m" << "It's External Command.." << "\033[0m" << endl;
         return new ExternalCommand(cmd_line,shellJobsPtr);
     }
