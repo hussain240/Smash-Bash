@@ -238,7 +238,8 @@ void KillCommand::execute() {
         perror("smash error: kill: invalid arguments");
         return;
     }
-    if(checkIfLegalSIGNAL(words[1])==-1 && words[1][0]!="-")
+    int num=checkIfLegalSIGNAL(words[1]);
+    if(num==-1 || words[1][0]!="-")
     {
         perror("smash error: kill: invalid arguments");
         return;
@@ -248,14 +249,22 @@ void KillCommand::execute() {
         std::cerr << "smash error: kill: job-id " << words[2] << " does not exist" << std::endl;
         return;
     }
+    int id= stringToInt(words[2]);
+    if(id==-1)
+    {
+        perror("smash error: kill: invalid arguments");
+        return;
+    }
     for(auto job : jobsPtr->jobs)
     {
-        if(job.jobId==words[1])
+        if(job.jobId==id)
         {
-            if (kill(job.jobId, checkIfLegalSIGNAL(words[1])) == -1) {
+            if (kill(job.jobId, num) == -1) {
                 // I don't know if we supposed to print here //
                 perror("smash error: kill failed");
             }
+
+            std::cout<<"signal number "<<num<<" was sent to pid "<<job.jobPid<<std::endl;
             return;
         }
     }
@@ -435,7 +444,19 @@ void SmallShell::executeCommand(const string cmd_line) {
 }
 ForegroundCommand::ForegroundCommand(const std::string cmd_line, JobsList *jobs):BuiltInCommand(cmd_lineP),jobsPtr(jobs) {
 }
+int stringToInt(const std::string& str) {
+    try {
+        size_t idx;
+        int result = std::stoi(str, &idx);
+        if (idx != str.length()) {
+            throw std::invalid_argument("Invalid input");
+        }
 
+        return result;
+    } catch (...) {
+        return -1;
+    }
+}
 void ForegroundCommand::execute() {
     vector<string> words = splitLine(cmd_line);
     if(words.size()!=2)
@@ -448,15 +469,22 @@ void ForegroundCommand::execute() {
         perror("smash error: fg: jobs list is empty");
         return;
     }
+    int num= stringToInt(words[1]);
+    if(num==-1)
+    {
+        perror("smash error: fg: invalid arguments");
+        return;
+    }
     for(auto job : jobsPtr->jobs)
     {
-        if(job.jobId==words[1])
+        if(job.jobId==num)
         {
-            std::cout<<job.jobName<<std::endl;
+            std::cout<<job.jobName<<" "<<num<<std::endl;
             if (waitpid(job.jobId, nullptr, 0) == -1) {
                 // I don't know if we supposed to print here //
                 perror("smash error: waitpid failed");
             }
+            jobsPtr->removeJobById(job.jobId);
             return;
         }
     }
