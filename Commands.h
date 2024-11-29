@@ -105,19 +105,21 @@ public:
     void execute() override;
 }; /// done "showpid"
 
-/*
+
 class JobsList;
 
 class QuitCommand : public BuiltInCommand {
     // TODO: Add your data members public:
-    QuitCommand(const string cmd_line, JobsList *jobs);
+public:
+    shared_ptr<JobsList>jobsPtr;
+    QuitCommand(const string cmd_line,shared_ptr<JobsList> shellJobsPtrP);
 
     virtual ~QuitCommand() {
     }
 
     void execute() override;
 };
-*/
+
 
 class JobsList {
 public:

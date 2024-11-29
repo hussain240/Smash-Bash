@@ -126,6 +126,8 @@ JobsCommand::JobsCommand(string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP)
         : BuiltInCommand(cmd_lineP), jobsPtr(shellJobsPtrP){}
 KillCommand::KillCommand(const std::string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP)
         : BuiltInCommand(cmd_lineP), jobsPtr(shellJobsPtrP){}
+QuitCommand::QuitCommand(const std::string cmd_line, shared_ptr <JobsList> shellJobsPtrP)
+: BuiltInCommand(cmd_line), jobsPtr(shellJobsPtrP){}
 
 /// Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 Command *SmallShell::CreateCommand(const string cmd_line) {
@@ -139,7 +141,7 @@ Command *SmallShell::CreateCommand(const string cmd_line) {
     }else if (words[0].compare("jobs") == 0 || words[0].compare("jobs&") == 0){
         return new JobsCommand(cmd_line,shellJobsPtr);
     }else if (words[0].compare("quit") == 0){
-        return new KillCommand(cmd_line,shellJobsPtr);
+        return new QuitCommand(cmd_line,shellJobsPtr);
     }else {
         cout << "\033[35m" << "It's External Command.." << "\033[0m" << endl;
         return new ExternalCommand(cmd_line,shellJobsPtr);
@@ -209,7 +211,7 @@ void JobsCommand::execute() {
     jobsPtr->printJobsList();
 }
 /// quit kill:
-void KillCommand::execute() {
+void QuitCommand::execute() {
     jobsPtr->killAllJobs();
     vector<string> words = splitLine(cmd_line); /// split line
     if(words.size() > 1 && (words[1].compare("kill") == 0 || words[1].compare("kill&") == 0)){
@@ -217,6 +219,9 @@ void KillCommand::execute() {
             perror("smash error: kill failed");
         }
     }
+}
+void KillCommand::execute() {
+
 }
 
 /// ExternalCommand:
