@@ -174,10 +174,12 @@ public:
 
     void execute() override;
 };
-/*
+
 class ForegroundCommand : public BuiltInCommand {
     // TODO: Add your data members
+    //fg command
 public:
+    shared_ptr<JobsList>jobsPtr;
     ForegroundCommand(const string cmd_line, JobsList *jobs);
 
     virtual ~ForegroundCommand() {
@@ -185,7 +187,7 @@ public:
 
     void execute() override;
 };
-
+/*
 class ListDirCommand : public Command {
 public:
     ListDirCommand(const string cmd_line);

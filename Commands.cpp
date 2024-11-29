@@ -388,3 +388,31 @@ void SmallShell::executeCommand(const string cmd_line) {
     /// Please note that you must fork smash process for some commands (e.g., external commands....)
     /// done in the execute
 }
+ForegroundCommand::ForegroundCommand(const std::string cmd_line, JobsList *jobs):BuiltInCommand(cmd_lineP),jobsPtr(jobs) {
+}
+
+void ForegroundCommand::execute() {
+    vector<string> words = splitLine(cmd_line);
+    if(words.size()!=2)
+    {
+        perror("smash error: fg: invalid arguments");
+    }
+    if(jobsPtr->jobs.size()==0)
+    {
+        perror("smash error: fg: jobs list is empty");
+    }
+    for(auto job : jobsPtr->jobs)
+    {
+        if(job.jobId==words[1])
+        {
+            std::cout<<job.jobName<<std::endl;
+            if (waitpid(job.jobId, nullptr, 0) == -1) {
+                // I don't know if we supposed to print here //
+                perror("smash error: waitpid failed");
+            }
+            return;
+        }
+    }
+    std::cerr << "smash error: fg: job-id " << words[1] << " does not exist" << std::endl;
+
+}
