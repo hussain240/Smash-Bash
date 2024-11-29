@@ -220,7 +220,47 @@ void QuitCommand::execute() {
         }
     }
 }
+int checkIfLegalSIGNAL(const std::string& str) {
+    if (str.length() < 2) {
+        return -1;
+    }
+    std::string numberPart = str.substr(1);
+    if (!std::all_of(numberPart.begin(), numberPart.end(), ::isdigit)) {
+        return -1;
+    }
+    int num = std::stoi(numberPart);
+    return num;
+}
 void KillCommand::execute() {
+    vector<string> words = splitLine(cmd_line);
+    if(words.size()!= 3)
+    {
+        perror("smash error: kill: invalid arguments");
+        return;
+    }
+    if(checkIfLegalSIGNAL(words[1])==-1 && words[1][0]!="-")
+    {
+        perror("smash error: kill: invalid arguments");
+        return;
+    }
+    if(jobsPtr->jobs.size()==0)
+    {
+        std::cerr << "smash error: kill: job-id " << words[2] << " does not exist" << std::endl;
+        return;
+    }
+    for(auto job : jobsPtr->jobs)
+    {
+        if(job.jobId==words[1])
+        {
+            if (kill(job.jobId, checkIfLegalSIGNAL(words[1])) == -1) {
+                // I don't know if we supposed to print here //
+                perror("smash error: kill failed");
+            }
+            return;
+        }
+    }
+    std::cerr << "smash error: kill: job-id " << words[2] << " does not exist" << std::endl;
+
 
 }
 
@@ -401,10 +441,12 @@ void ForegroundCommand::execute() {
     if(words.size()!=2)
     {
         perror("smash error: fg: invalid arguments");
+        return;
     }
     if(jobsPtr->jobs.size()==0)
     {
         perror("smash error: fg: jobs list is empty");
+        return;
     }
     for(auto job : jobsPtr->jobs)
     {

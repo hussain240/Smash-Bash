@@ -15,6 +15,7 @@ class JobsList;
 
 vector<string> splitLine(const string& line);
 string unsplitLine(const vector<string>& words);
+int checkIfLegalSIGNAL(const std::string& str);
 
 class Command {
 public:
