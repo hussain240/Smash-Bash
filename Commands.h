@@ -205,19 +205,21 @@ public:
     void execute() override;
 };
 
-/*
+
 class unaliasCommand : public BuiltInCommand {
 public:
     shared_ptr<unordered_map<string, string>> aliasCommandsPtr;
-    unaliasCommand(const string cmd_line, shared_ptr<JobsList> shellJobsPtrP,
-                   shared_ptr<unordered_map<string, string>> aliasCommandsPtr);
+    const std::string cmd_line;
+    shared_ptr <JobsList> shellJobsPtrP;
+    unaliasCommand(shared_ptr<unordered_map<string, string>> aliasCommandsPtr,
+    const std::string cmd_line,shared_ptr <JobsList> shellJobsPtrP);
 
     virtual ~unaliasCommand() {
     }
 
     void execute() override;
 };
-
+/*
 
 class ListDirCommand : public Command {
 public:

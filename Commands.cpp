@@ -278,7 +278,9 @@ ForegroundCommand::ForegroundCommand(const string cmd_lineP, shared_ptr<JobsList
 aliasCommand::aliasCommand(const string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP,
                            shared_ptr<unordered_map<string, string>> aliasCommandsPtrP)
               :BuiltInCommand(cmd_lineP), aliasCommandsPtr(aliasCommandsPtrP) {}
-
+unaliasCommand::unaliasCommand(shared_ptr <unordered_map<std::string, std::string>> aliasCommandsPtr,
+                               const std::string cmd_line, shared_ptr <JobsList> shellJobsPtrP)
+                               :aliasCommandsPtr(aliasCommandsPtr),cmd_line(cmd_line),shellJobsPtrP(shellJobsPtrP){}
 
 /// Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 Command *SmallShell::CreateCommand(const string cmd_line) {
@@ -319,7 +321,10 @@ Command *SmallShell::CreateCommand(const string cmd_line) {
         if(cmd != nullptr){
             cmd->execute();
         }
-    }else {
+    }else if (words[0].compare("unalias")==0){
+        return new unaliasCommand(aliasCommandsPtr,cmd_line,shellJobsPtr);
+    }
+    else {
         return new ExternalCommand(cmd_line,shellJobsPtr);
     }
     return nullptr;
@@ -556,6 +561,13 @@ void ExternalCommand::execute() {
     }
 }
 
+void unaliasCommand::execute() {
+    vector<string> words = splitLine(cmd_line);
+    if(words.size()<2)
+    {
+       std::cerr<<"smash error: unalias: not enough arguments"<<std::endl;
+    }
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// Jobs Funcs:
