@@ -3,9 +3,11 @@
 
 #include <limits.h>
 #include <memory>
+#include <algorithm>
 #include <unordered_map>
 #include <string>
 #include <vector>
+#include <regex>
 
 using namespace std;
 class JobsList;
@@ -50,7 +52,7 @@ public:
     }
 
     void execute() override;
-};
+}; /// done
 
 /*
 class PipeCommand : public Command {
@@ -120,7 +122,7 @@ public:
     }
 
     void execute() override;
-};
+}; /// done "quit kill"
 
 
 class JobsList {
@@ -180,18 +182,43 @@ public:
 };
 
 class ForegroundCommand : public BuiltInCommand {
-    // TODO: Add your data members
-    //fg command
 public:
-    shared_ptr<JobsList>jobsPtr;
-    ForegroundCommand(const string cmd_line, JobsList *jobs);
+    shared_ptr<JobsList> jobsPtr;
+    ForegroundCommand(const string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP);
 
     virtual ~ForegroundCommand() {
     }
 
     void execute() override;
 };
+
+class aliasCommand : public BuiltInCommand {
+public:
+    shared_ptr<unordered_map<string, string>> aliasCommandsPtr;
+
+    aliasCommand(const string cmd_line, shared_ptr<JobsList> shellJobsPtrP,
+                 shared_ptr<unordered_map<string, string>> aliasCommandsPtr);
+
+    virtual ~aliasCommand() {
+    }
+
+    void execute() override;
+};
+
 /*
+class unaliasCommand : public BuiltInCommand {
+public:
+    shared_ptr<unordered_map<string, string>> aliasCommandsPtr;
+    unaliasCommand(const string cmd_line, shared_ptr<JobsList> shellJobsPtrP,
+                   shared_ptr<unordered_map<string, string>> aliasCommandsPtr);
+
+    virtual ~unaliasCommand() {
+    }
+
+    void execute() override;
+};
+
+
 class ListDirCommand : public Command {
 public:
     ListDirCommand(const string cmd_line);
@@ -222,26 +249,6 @@ public:
 
     void execute() override;
 };
-
-class aliasCommand : public BuiltInCommand {
-public:
-    aliasCommand(const string cmd_line);
-
-    virtual ~aliasCommand() {
-    }
-
-    void execute() override;
-};
-
-class unaliasCommand : public BuiltInCommand {
-public:
-    unaliasCommand(const string cmd_line);
-
-    virtual ~unaliasCommand() {
-    }
-
-    void execute() override;
-};
 */
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -250,7 +257,7 @@ public:
 class SmallShell {
 private:
     shared_ptr<JobsList> shellJobsPtr; /// for background
-    shared_ptr<unordered_map<string, string>> alliesCommandsPtr; /// new defined commands (allies)
+    shared_ptr<unordered_map<string, string>> aliasCommandsPtr; /// new defined commands (allies)
     shared_ptr<string> lastDirectory;
     SmallShell();
 

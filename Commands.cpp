@@ -50,7 +50,145 @@ string unsplitLine(const vector<string>& words) {
     return oss.str();
 }
 
+/// unsplitLineNoFirstSpace func:
+string unsplitLineNoFirstSpace(const vector<string>& words) {
+    // Create an output string stream
+    ostringstream oss;
 
+    // Iterate through the words in the vector
+    for (size_t i = 0; i < words.size(); ++i) {
+        // If it's not the first word, add a space before the word
+        if (i != 0) {
+            oss << " ";
+        }
+        // Add the current word
+        oss << words[i];
+    }
+
+    // Convert stream to string and return
+    return oss.str();
+}
+
+/// stringToInt func:
+int stringToInt(const std::string& str) {
+    try {
+        size_t idx;
+        int result = std::stoi(str, &idx);
+        if (idx != str.length()) {
+            throw std::invalid_argument("Invalid input");
+        }
+
+        return result;
+    } catch (...) {
+        return -1;
+    }
+}
+
+/// checkIfLegalSIGNAL func:
+int checkIfLegalSIGNAL(const std::string& str) {
+    // Check if string is at least 2 characters long
+    if (str.length() < 2) {
+        return -1;
+    }
+
+    // Extract numeric part of the string
+    string numberPart = str.substr(1);
+
+    // Try to convert the number part to an integer
+    try {
+        int num = stoi(numberPart);
+        return num;
+    } catch (...) {
+        return -1; // Return -1 if conversion fails
+    }
+}
+
+/// isReservedAlias func:
+bool isReservedAlias(string name, shared_ptr<unordered_map<string, string>> mapPtr) {
+    if (name.back() == '&') {
+        name.pop_back();
+    }
+
+    if (mapPtr && mapPtr->find(name) != mapPtr->end()) {
+        return true;
+    }
+
+    return false;
+}
+
+/// getValueByKey func:
+string getValueByKey(const string& name, unordered_map<string, string> map) {
+    auto it = map.find(name); // Find the key in the map
+    if (it != map.end()) {
+        return it->second; // Return the value if found(always found)
+    }
+    return "";
+}
+
+/// isReservedKeyword func:
+bool isReservedKeyword(const string& name, shared_ptr<unordered_map<string, string>> mapPtr) {
+    if(name == "chprompt" || name == "pwd" || name == "showpid" || name == "cd" || name == "jobs"
+       || name == "quit" || name == "fg" || name == "kill" || name == "alias" || name == "unalias"){
+        return true;
+    }
+    return isReservedAlias(name,mapPtr);
+}
+
+/// isValidAliasName func:
+bool isValidAliasName(const string& name) {
+    // Ensure the name contains only valid characters
+    return std::regex_match(name, std::regex("^[a-zA-Z0-9_]+$"));
+}
+
+bool extractAlias(const string& input, string& name, string& command) {
+    // Check if the input starts with "alias "
+    if (input.find("alias ") != 0) {
+        return false; // Must start with "alias "
+    }
+
+    // Remove "alias " prefix
+    string aliasPart = input.substr(6);
+
+    // Find position of '=' and quotes
+    size_t equalPos = aliasPart.find('=');
+    size_t startQuote = aliasPart.find('\'', equalPos);
+    size_t endQuote = aliasPart.rfind('\'');
+
+    // Validate the positions and ensure they form a valid format
+    if (equalPos == string::npos || startQuote == string::npos || endQuote == string::npos || endQuote <= startQuote) {
+        return false; // Invalid format
+    }
+
+    // Extract the name part before '='
+    name = aliasPart.substr(0, equalPos);
+
+    // Trim spaces from the name
+    name.erase(0, name.find_first_not_of(" \t"));
+    name.erase(name.find_last_not_of(" \t") + 1);
+
+    // Ensure the name is not empty and contains no spaces
+    if (name.empty() || name.find(' ') != string::npos) {
+        return false; // Name cannot be empty or contain spaces
+    }
+
+    // Extract the command part between the single quotes
+    command = aliasPart.substr(startQuote + 1, endQuote - startQuote - 1);
+
+    return isValidAliasName(name);
+}
+
+/// printMap func:
+void printMap(const shared_ptr<unordered_map<string, string>>& mapPtr) {
+    if (!mapPtr || mapPtr->empty()) {
+        return;
+    }
+
+    for (const auto& entry : *mapPtr) {
+        std::cout << entry.first << "='" << entry.second << "'" << std::endl;
+    }
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////
 
 /*string _ltrim(const string &s) {
     size_t start = s.find_first_not_of(WHITESPACE);
@@ -107,13 +245,15 @@ void _removeBackgroundSign(char *cmd_line) {
 
 
 SmallShell::SmallShell() : shellJobsPtr(make_shared<JobsList>()),
-                            lastDirectory(make_shared<string>("error: cd: OLDPWD not set")) {}
+                           aliasCommandsPtr(make_shared<unordered_map<string, string>>()),
+                           lastDirectory(make_shared<string>("error: cd: OLDPWD not set")) {}
 SmallShell::~SmallShell() {
 }
 
 
 Command::Command(const string cmd_lineP) : cmd_line(cmd_lineP){}
 BuiltInCommand::BuiltInCommand(const string cmd_lineP) : Command(cmd_lineP){}
+
 ExternalCommand::ExternalCommand(const string cmd_lineP,shared_ptr<JobsList> shellJobsPtrP)
 : Command(cmd_lineP), jobsPtr(shellJobsPtrP){}
 
@@ -122,12 +262,23 @@ GetCurrDirCommand::GetCurrDirCommand(string cmd_lineP): BuiltInCommand(cmd_lineP
 
 ChangeDirCommand::ChangeDirCommand(string cmd_lineP, shared_ptr<string> pLastPwd)
         : BuiltInCommand(cmd_lineP), lastPathPtr(pLastPwd){}
+
 JobsCommand::JobsCommand(string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP)
         : BuiltInCommand(cmd_lineP), jobsPtr(shellJobsPtrP){}
+
 KillCommand::KillCommand(const std::string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP)
         : BuiltInCommand(cmd_lineP), jobsPtr(shellJobsPtrP){}
+
 QuitCommand::QuitCommand(const std::string cmd_line, shared_ptr <JobsList> shellJobsPtrP)
 : BuiltInCommand(cmd_line), jobsPtr(shellJobsPtrP){}
+
+ForegroundCommand::ForegroundCommand(const string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP)
+:BuiltInCommand(cmd_lineP),jobsPtr(shellJobsPtrP) {}
+
+aliasCommand::aliasCommand(const string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP,
+                           shared_ptr<unordered_map<string, string>> aliasCommandsPtrP)
+              :BuiltInCommand(cmd_lineP), aliasCommandsPtr(aliasCommandsPtrP) {}
+
 
 /// Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 Command *SmallShell::CreateCommand(const string cmd_line) {
@@ -146,9 +297,29 @@ Command *SmallShell::CreateCommand(const string cmd_line) {
         return new ForegroundCommand(cmd_line,shellJobsPtr);
     }else if(words[0].compare("kill")==0){
         return new KillCommand(cmd_line,shellJobsPtr);
-    }
-    else {
-        cout << "\033[35m" << "It's External Command.." << "\033[0m" << endl;
+    }else if(words[0].compare("alias")==0){
+        return new aliasCommand(cmd_line, shellJobsPtr, aliasCommandsPtr);
+    }else if(isReservedAlias(words[0], aliasCommandsPtr)){
+        bool background = false;
+        if (words[0].back() == '&') {
+            words[0].pop_back();
+            background = true;
+        }
+
+        cout << "\033[34m" << "in alias name " << words[0] << "\033[0m" << endl;
+        words[0] = getValueByKey(words[0], *aliasCommandsPtr);
+
+        if(background){
+            words[0].push_back('&');
+        }
+
+        cout << "\033[34m" << "in alias name " << words[0] << "\033[0m" << endl;
+        string new_line = unsplitLineNoFirstSpace(words);
+        Command* cmd = CreateCommand(new_line);
+        if(cmd != nullptr){
+            cmd->execute();
+        }
+    }else {
         return new ExternalCommand(cmd_line,shellJobsPtr);
     }
     return nullptr;
@@ -212,7 +383,6 @@ void ChangeDirCommand::execute(){
 }
 /// jobs:
 void JobsCommand::execute() {
-    jobsPtr->removeFinishedJobs();
     jobsPtr->printJobsList();
 }
 /// quit kill:
@@ -225,17 +395,7 @@ void QuitCommand::execute() {
         }
     }
 }
-int checkIfLegalSIGNAL(const std::string& str) {
-    if (str.length() < 2) {
-        return -1;
-    }
-    std::string numberPart = str.substr(1);
-    if (!std::all_of(numberPart.begin(), numberPart.end(), ::isdigit)) {
-        return -1;
-    }
-    int num = std::stoi(numberPart);
-    return num;
-}
+/// kill:
 void KillCommand::execute() {
     vector<string> words = splitLine(cmd_line);
     if(words.size()!= 3)
@@ -244,7 +404,7 @@ void KillCommand::execute() {
         return;
     }
     int num=checkIfLegalSIGNAL(words[1]);
-    if(num==-1 || words[1][0]!="-")
+    if(num==-1 || (words[1][0] != '-'))
     {
         perror("smash error: kill: invalid arguments");
         return;
@@ -264,7 +424,7 @@ void KillCommand::execute() {
     {
         if(job.jobId==id)
         {
-            if (kill(job.jobId, num) == -1) {
+            if (kill(job.jobPid, num) == -1) {
                 // I don't know if we supposed to print here //
                 perror("smash error: kill failed");
             }
@@ -274,8 +434,77 @@ void KillCommand::execute() {
         }
     }
     std::cerr << "smash error: kill: job-id " << id << " does not exist" << std::endl;
+}
+/// fg:
+void ForegroundCommand::execute() {
 
+    if(jobsPtr->jobs.size()==0)
+    {
+        perror("smash error: fg: jobs list is empty");
+        return;
+    }
 
+    vector<string> words = splitLine(cmd_line);
+
+    if(words.size() == 1){ /// we go for the max id (the last in list)
+        cout << jobsPtr->jobs.back().jobName << " " << jobsPtr->jobs.back().jobPid << endl;
+
+        if (waitpid(jobsPtr->jobs.back().jobPid, nullptr, 0) == -1) {
+            // I don't know if we supposed to print here //
+            perror("smash error: waitpid failed");
+        }
+
+        jobsPtr->removeJobById(jobsPtr->jobs.back().jobId);
+        return;
+    }
+
+    int id = stringToInt(words[1]);
+
+    if(words.size()!=2){
+        perror("smash error: fg: invalid arguments");
+        return;
+    } else if(id == -1){
+        perror("smash error: fg: invalid arguments");
+        return;
+    }
+
+    for(int i=0; i < jobsPtr->jobs.size(); i++)
+    {
+        if(jobsPtr->jobs[i].jobId == id)
+        {
+            cout << jobsPtr->jobs[i].jobName << " " << jobsPtr->jobs[i].jobPid << endl;
+            if (waitpid(jobsPtr->jobs[i].jobPid, nullptr, 0) == -1) {
+                perror("smash error: waitpid failed");
+            }
+            jobsPtr->removeJobById(jobsPtr->jobs[i].jobId);
+            return;
+        }
+    }
+    cerr << "smash error: fg: job-id " << id << " does not exist" << endl;
+
+}
+/// alias:
+void aliasCommand::execute() {
+    vector<string> words = splitLine(cmd_line); /// split line
+
+    if(words.size() == 1){
+        printMap(aliasCommandsPtr);
+        return;
+    }
+
+    string name,command;
+
+    if(!extractAlias(cmd_line, name, command)){
+        cerr << "smash error: alias: invalid alias format" << endl;
+        return;
+    }
+
+    if(isReservedKeyword(name,aliasCommandsPtr)){
+        cerr << "smash error: alias:" << name << " already exists or is a reserved command" << endl;
+        return;
+    }
+
+    aliasCommandsPtr->insert({name,command});
 }
 
 /// ExternalCommand:
@@ -313,6 +542,7 @@ void ExternalCommand::execute() {
             execvp(c_args[0], c_args.data());
         }
         perror("smash error: exec failed");
+        _exit(0);  // Child process exits here
     } else {
         /// Parent process
         if (isBackground) {
@@ -351,7 +581,6 @@ void JobsList::printJobsList(){
 
 void JobsList::killAllJobs()
 {
-    removeFinishedJobs();
     cout << "sending SIGKILL signal to " << jobs.size() << " jobs:" << endl;
     printJobsList();
 
@@ -401,16 +630,12 @@ void JobsList::removeJobById(int jobId){
         }
     }
 
-    int status;
-    pid_t result = waitpid(pid, &status, WNOHANG);
-
+    pid_t result = waitpid(pid, nullptr, WNOHANG);
     if (result == 0) {
         /// Process is still running
         if (kill(pid, SIGKILL) == -1) {
             perror("smash error: kill failed");
         }
-    } else if (result == -1) {
-        perror("smash error: waitpid failed");
     }
 }
 
@@ -442,57 +667,9 @@ JobsList::JobEntry *JobsList::getLastStoppedJob(int *jobId){
 void SmallShell::executeCommand(const string cmd_line) {
     Command* cmd = CreateCommand(cmd_line);
     if(cmd != nullptr){
+        shellJobsPtr->removeFinishedJobs();
         cmd->execute();
     }
     /// Please note that you must fork smash process for some commands (e.g., external commands....)
     /// done in the execute
-}
-ForegroundCommand::ForegroundCommand(const std::string cmd_line, JobsList *jobs):BuiltInCommand(cmd_lineP),jobsPtr(jobs) {
-}
-int stringToInt(const std::string& str) {
-    try {
-        size_t idx;
-        int result = std::stoi(str, &idx);
-        if (idx != str.length()) {
-            throw std::invalid_argument("Invalid input");
-        }
-
-        return result;
-    } catch (...) {
-        return -1;
-    }
-}
-void ForegroundCommand::execute() {
-    vector<string> words = splitLine(cmd_line);
-    if(words.size()!=2)
-    {
-        perror("smash error: fg: invalid arguments");
-        return;
-    }
-    if(jobsPtr->jobs.size()==0)
-    {
-        perror("smash error: fg: jobs list is empty");
-        return;
-    }
-    int num= stringToInt(words[1]);
-    if(num==-1)
-    {
-        perror("smash error: fg: invalid arguments");
-        return;
-    }
-    for(auto job : jobsPtr->jobs)
-    {
-        if(job.jobId==num)
-        {
-            std::cout<<job.jobName<<" "<<num<<std::endl;
-            if (waitpid(job.jobId, nullptr, 0) == -1) {
-                // I don't know if we supposed to print here //
-                perror("smash error: waitpid failed");
-            }
-            jobsPtr->removeJobById(job.jobId);
-            return;
-        }
-    }
-    std::cerr << "smash error: fg: job-id " << num << " does not exist" << std::endl;
-
 }
