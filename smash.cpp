@@ -10,41 +10,18 @@
 using namespace std;
 
 int main(int argc, char *argv[]) {
-    /*
     if (signal(SIGINT, ctrlCHandler) == SIG_ERR) {
         perror("smash error: failed to set ctrl-C handler");
     }
-    */
-
-    /// for chprompt:
-    std::string theWord="smash> ";
-    std::string prefix="chprompt";
 
     SmallShell &smash = SmallShell::getInstance();
 
     while (true) {
-        cout << theWord;
+        cout << smash.getSmashName() << "> ";
         string cmd_line;
         getline(std::cin, cmd_line);
-
-        vector<string> words = splitLine(cmd_line); /// split line
-        if(!words.empty()){
-            if(words[0] == prefix) /// its chprompt command
-            {
-                if(words.size() == 1) /// reset smash
-                {
-                    theWord="smash> ";
-                }
-                else if(words.size() > 1) /// change smash(even if already changed)
-                {
-                    theWord = words[1];
-                    theWord += "> ";
-                }
-            }
-            else
-            {
-                smash.executeCommand(cmd_line);
-            }
+        if(!cmd_line.empty()){
+            smash.executeCommand(cmd_line);
         }
     }
     return 0;

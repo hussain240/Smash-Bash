@@ -1,14 +1,14 @@
 #include <unistd.h>
 #include <string.h>
-#include <iostream>
 #include <vector>
 #include <sstream>
 #include <sys/wait.h>
 #include <iomanip>
 #include "Commands.h"
-  
+
 using namespace std;
 const std::string WHITESPACE = " \n\r\t\f\v";
+
 
 #if 0
 #define FUNC_ENTRY()  \
@@ -31,23 +31,6 @@ vector<string> splitLine(const string& line) {
         words.push_back(word);
     }
     return words;
-}
-
-/// unsplitLine func:
-string unsplitLine(const vector<string>& words) {
-    // Create an output string stream
-    ostringstream oss;
-
-    // Join the words with a space as the delimiter
-    for (size_t i = 0; i < words.size(); ++i) {
-        oss << words[i];
-        if (i != words.size() - 1) {  // Add space after every word except the last
-            oss << " ";
-        }
-    }
-
-    // Convert stream to string and return
-    return oss.str();
 }
 
 /// unsplitLineNoFirstSpace func:
@@ -104,46 +87,60 @@ int checkIfLegalSIGNAL(const std::string& str) {
 }
 
 /// isReservedAlias func:
-bool isReservedAlias(string name, shared_ptr<unordered_map<string, string>> mapPtr) {
-    if (name.back() == '&') {
-        name.pop_back();
-    }
-
-    if (mapPtr && mapPtr->find(name) != mapPtr->end()) {
+bool isReservedAlias(const string& name, const vector<pair<string,string>>& commands) {
+    int size = commands.size();
+    for(int i=0; i < size; i++)
+    if (commands[i].first == name) {
         return true;
     }
-
     return false;
 }
 
 /// getValueByKey func:
-string getValueByKey(const string& name, unordered_map<string, string> map) {
-    auto it = map.find(name); // Find the key in the map
-    if (it != map.end()) {
-        return it->second; // Return the value if found(always found)
-    }
+string getValueByKey(const string& name, const vector<pair<string,string>>& commands) {
+    int size = commands.size();
+    for(int i=0; i < size; i++)
+        if (commands[i].first == name) {
+            return commands[i].second;
+        }
     return "";
 }
 
 /// isReservedKeyword func:
-bool isReservedKeyword(const string& name, shared_ptr<unordered_map<string, string>> mapPtr) {
+bool isReservedKeyword(const string& name, const vector<pair<string,string>>& commands) {
     if(name == "chprompt" || name == "pwd" || name == "showpid" || name == "cd" || name == "jobs"
        || name == "quit" || name == "fg" || name == "kill" || name == "alias" || name == "unalias"){
         return true;
     }
-    return isReservedAlias(name,mapPtr);
+    return isReservedAlias(name,commands);
 }
 
 /// isValidAliasName func:
 bool isValidAliasName(const string& name) {
     // Ensure the name contains only valid characters
-    return std::regex_match(name, std::regex("^[a-zA-Z0-9_]+$"));
+    return regex_match(name, regex("^[a-zA-Z0-9_]+$"));
 }
 
+/// extractAlias func:
 bool extractAlias(const string& input, string& name, string& command) {
+    string pattern = R"(^alias [a-zA-Z0-9_]+='[^']*'$)";
+    regex alias_regex(pattern);
+
+    if(!regex_match(input, alias_regex)){
+        return false;
+    }
+
     // Check if the input starts with "alias "
     if (input.find("alias ") != 0) {
         return false; // Must start with "alias "
+    }
+
+    string cleanLine = input;
+    while (cleanLine.back() == ' '){
+        cleanLine.pop_back();
+    }
+    if(cleanLine.back() != '\''){
+        return false;
     }
 
     // Remove "alias " prefix
@@ -157,6 +154,12 @@ bool extractAlias(const string& input, string& name, string& command) {
     // Validate the positions and ensure they form a valid format
     if (equalPos == string::npos || startQuote == string::npos || endQuote == string::npos || endQuote <= startQuote) {
         return false; // Invalid format
+    }
+
+    // Ensure there are no spaces around the '='
+    if ((equalPos > 0 && aliasPart[equalPos - 1] == ' ') ||
+        (equalPos + 1 < aliasPart.size() && aliasPart[equalPos + 1] == ' ')) {
+        return false; // Spaces around '=' are not allowed
     }
 
     // Extract the name part before '='
@@ -177,157 +180,379 @@ bool extractAlias(const string& input, string& name, string& command) {
     return isValidAliasName(name);
 }
 
+/// splitRedirection func:
+bool splitRedirection(const string& line, string& before, string& after) {
+    // Find the position of '>>' first (to prioritize double redirection)
+    int posDouble = line.find(">>");
+    int posSingle = line.find('>');
+
+    // Determine the redirection position
+    int pos = -1;  // Default to not found
+    if (posDouble != -1) {
+        pos = posDouble;  // '>>' found
+    } else if (posSingle != -1) {
+        pos = posSingle;  // '>' found
+    }
+
+    if (pos != -1) {
+        // Everything before the redirection operator
+        before = line.substr(0, pos);
+
+        // Everything after the redirection operator (skip over '>' or '>>')
+        after = line.substr(pos + (posDouble != -1 ? 2 : 1));
+    } else {
+        // No redirection found, the whole line is before and empty after
+        before = line;
+        after = "";
+    }
+
+    bool isDouble = false;
+    if(posDouble != -1){
+        isDouble = true;
+    }
+    return isDouble;
+}
+
+/// pipeCommands func:
+bool pipeCommands(const string& line, string& cmd1, string& cmd2) {
+    size_t pipePos = line.find('|');
+    bool redirectStderr = false;
+    if (pipePos != string::npos && line[pipePos + 1] == '&') {
+        redirectStderr = true;
+        pipePos++;
+    }
+
+    if (pipePos != string::npos) {
+        cmd1 = line.substr(0, pipePos);
+        cmd2 = line.substr(pipePos + 1);
+    }
+
+    return redirectStderr;
+}
+
+/// checkIO func:
+bool checkIO(string line){
+    int x = line.find('>');
+    if(x == -1){
+        return false;
+    }
+    return true;
+}
+
+bool checkPipe(string line){
+    int x = line.find('|');
+    if(x != -1){
+        return true;
+    }
+    return false;
+}
+
 /// printMap func:
-void printMap(const shared_ptr<unordered_map<string, string>>& mapPtr) {
-    if (!mapPtr || mapPtr->empty()) {
+void printMap(const vector<pair<string,string>>& commands) {
+    int size = commands.size();
+    if (size == 0) {
         return;
     }
 
-    for (const auto& entry : *mapPtr) {
-        std::cout << entry.first << "='" << entry.second << "'" << std::endl;
+    for (int i=0; i<size; i++) {
+        cout << commands[i].first << "='" << commands[i].second << "'" << endl;
+    }
+}
+
+/// printNetworkInfo func:
+void printNetworkInfo(const string interface) {
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        std::cerr << "smash error: netinfo: unable to create socket" << std::endl;
+        return;
+    }
+
+    struct ifreq ifr;
+    strncpy(ifr.ifr_name, interface.c_str(), IFNAMSIZ - 1);
+    ifr.ifr_name[IFNAMSIZ - 1] = '\0';
+
+    // Get IP Address
+    if (ioctl(sock, SIOCGIFADDR, &ifr) < 0) {
+        std::cerr << "smash error: netinfo: interface " << interface << " does not exist" << std::endl;
+        close(sock);
+        return;
+    }
+    struct sockaddr_in *ipaddr = (struct sockaddr_in *)&ifr.ifr_addr;
+    std::string ipAddress = inet_ntoa(ipaddr->sin_addr);
+
+    // Get Subnet Mask
+    if (ioctl(sock, SIOCGIFNETMASK, &ifr) < 0) {
+        std::cerr << "smash error: netinfo: could not retrieve subnet mask" << std::endl;
+        close(sock);
+        return;
+    }
+    struct sockaddr_in *netmask = (struct sockaddr_in *)&ifr.ifr_netmask;
+    std::string subnetMask = inet_ntoa(netmask->sin_addr);
+
+    close(sock);
+
+    // Get Default Gateway by reading /proc/net/route using system calls
+    std::string gateway = "N/A";
+    int routeFile = open("/proc/net/route", O_RDONLY);
+    if (routeFile != -1) {
+        char buffer[1024];
+        ssize_t bytesRead;
+        while ((bytesRead = read(routeFile, buffer, sizeof(buffer))) > 0) {
+            std::string line(buffer, bytesRead);
+            size_t pos = line.find(interface);
+            if (pos != std::string::npos) {
+                // Find gateway address in the same line
+                size_t gatewayPos = line.find_first_of("\t", line.find("00000000"));
+                if (gatewayPos != std::string::npos) {
+                    std::string gatewayHex = line.substr(gatewayPos + 1, 8);
+                    unsigned long gatewayDec = std::stoul(gatewayHex, nullptr, 16);
+                    struct in_addr gwAddr;
+                    gwAddr.s_addr = gatewayDec;
+                    gateway = inet_ntoa(gwAddr);
+                }
+                break;
+            }
+        }
+        close(routeFile);
+    }
+
+    // Get DNS Servers by reading /etc/resolv.conf using system calls
+    std::string dnsServers = "N/A";
+    int resolvFile = open("/etc/resolv.conf", O_RDONLY);
+    if (resolvFile != -1) {
+        char buffer[1024];
+        ssize_t bytesRead;
+        std::string dnsList;
+        while ((bytesRead = read(resolvFile, buffer, sizeof(buffer))) > 0) {
+            std::string line(buffer, bytesRead);
+            if (line.find("nameserver") == 0) {
+                dnsList += line.substr(11); // Remove "nameserver "
+            }
+        }
+        close(resolvFile);
+        if (!dnsList.empty()) {
+            dnsServers = dnsList;
+        }
+    }
+
+    // Print the network details
+    std::cout << "IP Address: " << ipAddress << std::endl;
+    std::cout << "Subnet Mask: " << subnetMask << std::endl;
+    std::cout << "Default Gateway: " << gateway << std::endl;
+    std::cout << "DNS Servers: " << dnsServers << std::endl;
+}
+
+/// readDirectory func:
+void readDirectory(const std::string& directoryPath, std::vector<std::string>& files) {
+    int pipefd[2];
+
+
+    if (pipe(pipefd) == -1) {
+        perror("smash error: Pipe failed");
+        return;
+    }
+
+    pid_t pid = fork();
+
+    if (pid == -1) {
+        perror("smash error: fork failed");
+        return;
+    }
+
+    if (pid == 0) {
+
+        close(pipefd[0]);
+
+        dup2(pipefd[1], STDOUT_FILENO);
+
+        char* const args[] = {
+                (char*)"ls",
+                (char*)"-1",
+                (char*)directoryPath.c_str(),
+                nullptr
+        };
+
+        execvp(args[0], args);
+
+        perror("smash error: execute failed");
+        exit(1);
+    } else {
+
+        close(pipefd[1]);
+
+
+        char buffer[1024];
+        ssize_t bytesRead;
+
+        while ((bytesRead = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
+            buffer[bytesRead] = '\0';
+
+
+            char* line = strtok(buffer, "\n");
+            while (line != nullptr) {
+                std::string filename(line);
+
+
+                if (!filename.empty()) {
+                    files.push_back(filename);
+                }
+
+                line = strtok(nullptr, "\n");
+            }
+        }
+
+
+        close(pipefd[0]);
+
+
+        waitpid(pid, nullptr, 0);
+    }
+}
+
+/// listDirectory func:
+void listDirectory(const std::string& dirPath, int depth) {
+    std::vector<std::string> entries;
+    readDirectory(dirPath, entries);
+
+
+    std::sort(entries.begin(), entries.end());
+
+
+    std::vector<std::string> directories;
+    std::vector<std::string> files;
+    for (const auto& entry : entries) {
+        if (entry == "." || entry == "..") continue;
+        struct stat entryStat;
+        std::string fullPath = dirPath + "/" + entry;
+        if (stat(fullPath.c_str(), &entryStat) == 0) {
+            if (S_ISDIR(entryStat.st_mode)) {
+                directories.push_back(entry);
+            } else {
+                files.push_back(entry);
+            }
+        }
+    }
+
+
+    for (const auto& dir : directories) {
+        for (int i = 0; i < depth; ++i) std::cout << '\t';
+        std::cout << dir << std::endl;
+        listDirectory(dirPath + "/" + dir, depth + 1);
+    }
+
+
+    for (const auto& file : files) {
+        for (int i = 0; i < depth; ++i) std::cout << '\t';
+        std::cout << file << std::endl;
     }
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 
-/*string _ltrim(const string &s) {
-    size_t start = s.find_first_not_of(WHITESPACE);
-    return (start == std::string::npos) ? "" : s.substr(start);
-}
 
-string _rtrim(const string &s) {
-    size_t end = s.find_last_not_of(WHITESPACE);
-    return (end == std::string::npos) ? "" : s.substr(0, end + 1);
-}
-
-string _trim(const string &s) {
-    return _rtrim(_ltrim(s));
-}
-
-int _parseCommandLine(const char *cmd_line, char **args) {
-    FUNC_ENTRY()
-    int i = 0;
-    std::istringstream iss(_trim(string(cmd_line)).c_str());
-    for (std::string s; iss >> s;) {
-        args[i] = (char *) malloc(s.length() + 1);
-        memset(args[i], 0, s.length() + 1);
-        strcpy(args[i], s.c_str());
-        args[++i] = NULL;
-    }
-    return i;
-
-    FUNC_EXIT()
-}
-
-bool _isBackgroundComamnd(const char *cmd_line) {
-    const string str(cmd_line);
-    return str[str.find_last_not_of(WHITESPACE)] == '&';
-}
-
-void _removeBackgroundSign(char *cmd_line) {
-    const string str(cmd_line);
-    // find last character other than spaces
-    unsigned int idx = str.find_last_not_of(WHITESPACE);
-    // if all characters are spaces then return
-    if (idx == string::npos) {
-        return;
-    }
-    // if the command line does not end with & then return
-    if (cmd_line[idx] != '&') {
-        return;
-    }
-    // replace the & (background sign) with space and then remove all tailing spaces.
-    cmd_line[idx] = ' ';
-    // truncate the command line string up to the last non-space character
-    cmd_line[str.find_last_not_of(WHITESPACE, idx) + 1] = 0;
-}
-*/
-
-
-SmallShell::SmallShell() : shellJobsPtr(make_shared<JobsList>()),
-                           aliasCommandsPtr(make_shared<unordered_map<string, string>>()),
-                           lastDirectory(make_shared<string>("error: cd: OLDPWD not set")) {}
-SmallShell::~SmallShell() {
-}
+SmallShell::SmallShell() : smashName("smash"),
+                           current_command(""),
+                           shellJobs(),
+                           aliasCommands(),
+                           lastDirectory("smash error: cd: OLDPWD not set"),
+                           fgPid(-1){}
+SmallShell::~SmallShell() {}
 
 
 Command::Command(const string cmd_lineP) : cmd_line(cmd_lineP){}
 BuiltInCommand::BuiltInCommand(const string cmd_lineP) : Command(cmd_lineP){}
+RedirectionCommand::RedirectionCommand(const string cmd_lineP) : Command(cmd_lineP){}
+PipeCommand::PipeCommand(const string cmd_lineP) : Command(cmd_lineP){}
+NetInfo::NetInfo(const string cmd_lineP) : Command(cmd_lineP) {}
+WhoAmICommand::WhoAmICommand(const string cmd_line):Command(cmd_line){}
+ListDirCommand:: ListDirCommand(const string cmd_line):Command(cmd_line){}
 
-ExternalCommand::ExternalCommand(const string cmd_lineP,shared_ptr<JobsList> shellJobsPtrP)
-: Command(cmd_lineP), jobsPtr(shellJobsPtrP){}
+ExternalCommand::ExternalCommand(const string cmd_lineP,bool is)
+: Command(cmd_lineP),isBackground(is){}
 
 ShowPidCommand::ShowPidCommand(string cmd_lineP): BuiltInCommand(cmd_lineP){}
 GetCurrDirCommand::GetCurrDirCommand(string cmd_lineP): BuiltInCommand(cmd_lineP){}
 
-ChangeDirCommand::ChangeDirCommand(string cmd_lineP, shared_ptr<string> pLastPwd)
-        : BuiltInCommand(cmd_lineP), lastPathPtr(pLastPwd){}
+ChangeDirCommand::ChangeDirCommand(string cmd_lineP): BuiltInCommand(cmd_lineP){}
 
-JobsCommand::JobsCommand(string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP)
-        : BuiltInCommand(cmd_lineP), jobsPtr(shellJobsPtrP){}
+JobsCommand::JobsCommand(string cmd_lineP): BuiltInCommand(cmd_lineP){}
 
-KillCommand::KillCommand(const std::string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP)
-        : BuiltInCommand(cmd_lineP), jobsPtr(shellJobsPtrP){}
+KillCommand::KillCommand(const string cmd_lineP): BuiltInCommand(cmd_lineP){}
 
-QuitCommand::QuitCommand(const std::string cmd_line, shared_ptr <JobsList> shellJobsPtrP)
-: BuiltInCommand(cmd_line), jobsPtr(shellJobsPtrP){}
+QuitCommand::QuitCommand(const string cmd_line): BuiltInCommand(cmd_line){}
 
-ForegroundCommand::ForegroundCommand(const string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP)
-:BuiltInCommand(cmd_lineP),jobsPtr(shellJobsPtrP) {}
+ForegroundCommand::ForegroundCommand(const string cmd_lineP):BuiltInCommand(cmd_lineP) {}
 
-aliasCommand::aliasCommand(const string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP,
-                           shared_ptr<unordered_map<string, string>> aliasCommandsPtrP)
-              :BuiltInCommand(cmd_lineP), aliasCommandsPtr(aliasCommandsPtrP) {}
-unaliasCommand::unaliasCommand(shared_ptr <unordered_map<std::string, std::string>> aliasCommandsPtr,
-                               const std::string cmd_line, shared_ptr <JobsList> shellJobsPtrP)
-                               :aliasCommandsPtr(aliasCommandsPtr),cmd_line(cmd_line),shellJobsPtrP(shellJobsPtrP){}
+aliasCommand::aliasCommand(const string cmd_lineP):BuiltInCommand(cmd_lineP) {}
+
+unaliasCommand::unaliasCommand(const string cmd_lineP):BuiltInCommand(cmd_lineP){}
+
 
 /// Creates and returns a pointer to Command class which matches the given command line (cmd_line)
 Command *SmallShell::CreateCommand(const string cmd_line) {
-    vector<string> words = splitLine(cmd_line); /// split line
-    if (words[0].compare("pwd") == 0 || words[0].compare("pwd&") == 0) {
+    string cleanLine = cmd_line;
+    bool is = false;
+    while (!cleanLine.empty() && cleanLine.back() == ' '){
+        cleanLine.pop_back();
+    }
+    if(!cleanLine.empty() && cleanLine.back() == '&'){
+        cleanLine.pop_back();
+        is = true;
+    }
+
+    vector<string> words = splitLine(cleanLine); /// split line
+    if(words[0].compare("alias")==0){
+        return new aliasCommand(cmd_line);
+    }else if(checkIO(cleanLine)){
+        return new RedirectionCommand(cleanLine);
+    } else if(checkPipe(cmd_line)){
+        return new PipeCommand(cleanLine);
+    } else if (words[0].compare("chprompt") == 0) {
+        /// if we removed the & from the second we should return it
+        if(words.size() == 2 && is){
+            words[2] += "&";
+        }
+        /// for chprompt:
+        string theWord="smash";
+        if(words.size() > 1) /// change smash(even if already changed)
+        {
+            theWord = words[1];
+        }
+        smashName = theWord;
+        return nullptr;
+    }else if (words[0].compare("pwd") == 0 || words[0].compare("pwd&") == 0) {
         return new GetCurrDirCommand(cmd_line);
     }else if (words[0].compare("showpid") == 0 || words[0].compare("showpid&") == 0) {
         return new ShowPidCommand(cmd_line);
-    }else if (words[0].compare("cd") == 0 && words.size() != 1){
-        return new ChangeDirCommand(cmd_line, lastDirectory);
+    }else if (words[0].compare("cd") == 0){
+        return new ChangeDirCommand(cmd_line);
     }else if (words[0].compare("jobs") == 0 || words[0].compare("jobs&") == 0){
-        return new JobsCommand(cmd_line,shellJobsPtr);
+        return new JobsCommand(cmd_line);
     }else if (words[0].compare("quit") == 0){
-        return new QuitCommand(cmd_line,shellJobsPtr);
+        return new QuitCommand(cmd_line);
     }else if(words[0].compare("fg")==0){
-        return new ForegroundCommand(cmd_line,shellJobsPtr);
+        return new ForegroundCommand(cmd_line);
     }else if(words[0].compare("kill")==0){
-        return new KillCommand(cmd_line,shellJobsPtr);
-    }else if(words[0].compare("alias")==0){
-        return new aliasCommand(cmd_line, shellJobsPtr, aliasCommandsPtr);
-    }else if(isReservedAlias(words[0], aliasCommandsPtr)){
-        bool background = false;
-        if (words[0].back() == '&') {
-            words[0].pop_back();
-            background = true;
-        }
+        return new KillCommand(cmd_line);
+    }else if(words[0].compare("unalias")==0){
+        return new unaliasCommand(cleanLine);
+    }else if(words[0].compare("netinfo")==0){
+        return new NetInfo(cleanLine);
+    }else if(words[0].compare("listdir")==0){
+        return new ListDirCommand(cleanLine);
+    }else if(words[0].compare("whoami")==0){
+        return new WhoAmICommand(cleanLine);
+    }else if(isReservedAlias(words[0], aliasCommands)){
+        words[0] = getValueByKey(words[0], aliasCommands);
 
-        cout << "\033[34m" << "in alias name " << words[0] << "\033[0m" << endl;
-        words[0] = getValueByKey(words[0], *aliasCommandsPtr);
-
-        if(background){
-            words[0].push_back('&');
-        }
-
-        cout << "\033[34m" << "in alias name " << words[0] << "\033[0m" << endl;
         string new_line = unsplitLineNoFirstSpace(words);
-        Command* cmd = CreateCommand(new_line);
-        if(cmd != nullptr){
-            cmd->execute();
+        if(is){
+            new_line.push_back('&');
         }
-    }else if (words[0].compare("unalias")==0){
-        return new unaliasCommand(aliasCommandsPtr,cmd_line,shellJobsPtr);
+        Command* cmd = CreateCommand(new_line);
+        return cmd;
     }
-    else {
-        return new ExternalCommand(cmd_line,shellJobsPtr);
-    }
-    return nullptr;
+    return new ExternalCommand(cmd_line,is);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -344,14 +569,26 @@ void GetCurrDirCommand::execute(){
     if (getcwd(cwd, sizeof(cwd)) != nullptr) {
         std::cout << cwd << std::endl; // Print the current working directory
     } else {
-        std::cout << "nothing" << std::endl;
+       perror("smash error: getcwd failed");
     }
 }
 /// cd:
 void ChangeDirCommand::execute(){
-    vector<string> words = splitLine(cmd_line); /// split line
+    SmallShell &smash = SmallShell::getInstance();
+    string cleanLine = cmd_line;
+    while (!cleanLine.empty() && cleanLine.back() == ' '){
+        cleanLine.pop_back();
+    }
+    if(!cleanLine.empty() && cleanLine.back() == '&'){
+        cleanLine.pop_back();
+    }
+    
+    vector<string> words = splitLine(cleanLine); /// split line
+    if(words.size() == 1){
+        return;
+    }
     if(words.size() > 2){
-        cout << "smash error: cd: too many arguments" << endl;
+        cerr << "smash error: cd: too many arguments" << endl;
     } else{
         /// get current path:
         char cwd[PATH_MAX];
@@ -359,170 +596,423 @@ void ChangeDirCommand::execute(){
         if (getcwd(cwd, sizeof(cwd)) != nullptr) {
             currentPath = cwd;
         } else{
-            cout << "Nothing" << endl;
+            perror("smash error: getcwd failed");
             return;
         }
 
+        string lastDir = smash.getLastDirectory();
         if(words[1] == "-"){
             /// check if we can go back
-            if(*lastPathPtr == "error: cd: OLDPWD not set"){
-                cout << *lastPathPtr << endl;
+            if(lastDir == "smash error: cd: OLDPWD not set"){
+                cerr << lastDir << endl;
             }else{
-                string lastPath = lastPathPtr->data();
                 /// go to folder:
-                if (chdir(lastPath.c_str()) != 0) {
-                    perror("smash error: cd failed");
+                if (chdir(lastDir.c_str()) != 0) {
+                    perror("smash error: chdir failed");
                 }
-
-                *lastPathPtr = currentPath; /// modify last path ptr
+                smash.getLastDirectory() = currentPath; /// modify last path ptr
             }
         } else{ /// its a path
             /// go to folder:
             if (chdir(words[1].c_str()) != 0) {
-                perror("smash error: cd failed");
-            } else{
-                *lastPathPtr = currentPath; /// modify last path ptr
-            }
+                perror("smash error: chdir failed");
+            }else if(smash.getLastDirectory() != currentPath){
+				smash.getLastDirectory() = currentPath; /// modify last path ptr
+			}
         }
     }
 }
 /// jobs:
 void JobsCommand::execute() {
-    jobsPtr->printJobsList();
+    SmallShell &smash = SmallShell::getInstance();
+    smash.getShellJobs().printJobsList();
 }
 /// quit kill:
 void QuitCommand::execute() {
-    jobsPtr->killAllJobs();
-    vector<string> words = splitLine(cmd_line); /// split line
-    if(words.size() > 1 && (words[1].compare("kill") == 0 || words[1].compare("kill&") == 0)){
-        if (kill(getpid(), SIGKILL) == -1) {
-            perror("smash error: kill failed");
-        }
+    SmallShell &smash = SmallShell::getInstance();
+    string cleanLine = cmd_line;
+    if(cmd_line.back() == '&'){
+        cleanLine.pop_back();
     }
+
+    vector<string> words = splitLine(cleanLine); /// split line
+
+    if(words.size() > 1 && (words[1].compare("kill") == 0)){
+        smash.getShellJobs().killAllJobs();
+    }
+    exit(0);
 }
 /// kill:
 void KillCommand::execute() {
-    vector<string> words = splitLine(cmd_line);
+    SmallShell &smash = SmallShell::getInstance();
+    string cleanLine = cmd_line;
+    if(cmd_line.back() == '&'){
+        cleanLine.pop_back();
+    }
+
+    vector<string> words = splitLine(cleanLine);
     if(words.size()!= 3)
     {
-        perror("smash error: kill: invalid arguments");
+        cerr << "smash error: kill: invalid arguments" << endl;
         return;
     }
     int num=checkIfLegalSIGNAL(words[1]);
     if(num==-1 || (words[1][0] != '-'))
     {
-        perror("smash error: kill: invalid arguments");
+        cerr << "smash error: kill: invalid arguments" << endl;
         return;
     }
     int id= stringToInt(words[2]);
-    if(id==-1)
-    {
-        perror("smash error: kill: invalid arguments");
+    if(id==-1) {
+        cerr << "smash error: kill: invalid arguments" << endl;
         return;
     }
-    if(jobsPtr->jobs.size()==0)
-    {
-        std::cerr << "smash error: kill: job-id " << id << " does not exist" << std::endl;
+    if(smash.getShellJobs().jobs.size() == 0) {
+        cerr << "smash error: kill: job-id " << id << " does not exist" << endl;
         return;
     }
-    for(auto job : jobsPtr->jobs)
-    {
-        if(job.jobId==id)
-        {
+    for(auto job : smash.getShellJobs().jobs) {
+        if(job.jobId==id) {
+			cout << "signal number " << num << " was sent to pid " << job.jobPid << endl;
             if (kill(job.jobPid, num) == -1) {
-                // I don't know if we supposed to print here //
                 perror("smash error: kill failed");
+                return;
             }
-
-            std::cout<<"signal number "<<num<<" was sent to pid "<<job.jobPid<<std::endl;
             return;
         }
     }
-    std::cerr << "smash error: kill: job-id " << id << " does not exist" << std::endl;
+    cerr << "smash error: kill: job-id " << id << " does not exist" << endl;
 }
 /// fg:
 void ForegroundCommand::execute() {
-
-    if(jobsPtr->jobs.size()==0)
-    {
-        perror("smash error: fg: jobs list is empty");
-        return;
+    SmallShell &smash = SmallShell::getInstance();
+    string cleanLine = cmd_line;
+    if(cmd_line.back() == '&'){
+        cleanLine.pop_back();
     }
-
-    vector<string> words = splitLine(cmd_line);
+    vector<string> words = splitLine(cleanLine);
 
     if(words.size() == 1){ /// we go for the max id (the last in list)
-        cout << jobsPtr->jobs.back().jobName << " " << jobsPtr->jobs.back().jobPid << endl;
+        if(smash.getShellJobs().jobs.size()==0){
+            cerr <<"smash error: fg: jobs list is empty" << endl;
+            return;
+        }
 
-        if (waitpid(jobsPtr->jobs.back().jobPid, nullptr, 0) == -1) {
+        cout << smash.getShellJobs().jobs.back().jobName << " " << smash.getShellJobs().jobs.back().jobPid << endl;
+        smash.setFgPid(smash.getShellJobs().jobs.back().jobPid);
+        if (waitpid(smash.getShellJobs().jobs.back().jobPid, nullptr, 0) == -1) {
             // I don't know if we supposed to print here //
             perror("smash error: waitpid failed");
         }
-
-        jobsPtr->removeJobById(jobsPtr->jobs.back().jobId);
+        smash.getShellJobs().removeJobById(smash.getShellJobs().jobs.back().jobId);
+        smash.setFgPid(-1);
         return;
     }
 
-    int id = stringToInt(words[1]);
+    if(words.size() == 2) {
 
-    if(words.size()!=2){
-        perror("smash error: fg: invalid arguments");
-        return;
-    } else if(id == -1){
-        perror("smash error: fg: invalid arguments");
-        return;
-    }
+        int id = stringToInt(words[1]);
 
-    for(int i=0; i < jobsPtr->jobs.size(); i++)
-    {
-        if(jobsPtr->jobs[i].jobId == id)
-        {
-            cout << jobsPtr->jobs[i].jobName << " " << jobsPtr->jobs[i].jobPid << endl;
-            if (waitpid(jobsPtr->jobs[i].jobPid, nullptr, 0) == -1) {
-                perror("smash error: waitpid failed");
-            }
-            jobsPtr->removeJobById(jobsPtr->jobs[i].jobId);
+        if (id < 0) {
+            cerr << "smash error: fg: invalid arguments" << endl;
             return;
         }
-    }
-    cerr << "smash error: fg: job-id " << id << " does not exist" << endl;
 
+        int size = smash.getShellJobs().jobs.size();
+        for (int i = 0; i < size; i++) {
+            if (smash.getShellJobs().jobs[i].jobId == id) {
+                smash.setFgPid(smash.getShellJobs().jobs[i].jobPid);
+                cout << smash.getShellJobs().jobs[i].jobName << " " << smash.getShellJobs().jobs[i].jobPid << endl;
+                if (waitpid(smash.getShellJobs().jobs[i].jobPid, nullptr, 0) == -1) {
+                    perror("smash error: waitpid failed");
+                }
+                smash.setFgPid(-1);
+                smash.getShellJobs().removeJobById(smash.getShellJobs().jobs[i].jobId);
+                return;
+            }
+        }
+        cerr << "smash error: fg: job-id " << id << " does not exist" << endl;
+        return;
+    }
+
+    cerr << "smash error: fg: invalid arguments" << endl;
 }
 /// alias:
 void aliasCommand::execute() {
     vector<string> words = splitLine(cmd_line); /// split line
-
+    SmallShell &smash = SmallShell::getInstance();
     if(words.size() == 1){
-        printMap(aliasCommandsPtr);
+        printMap(smash.getAliasCommands());
         return;
     }
 
     string name,command;
-
-    if(!extractAlias(cmd_line, name, command)){
+	string cleanLine = cmd_line;
+    while (!cleanLine.empty() && cleanLine.back() == ' '){
+        cleanLine.pop_back();
+    }
+    if(!cleanLine.empty() && cleanLine.back() == '&'){
+        cleanLine.pop_back();
+    }
+    while (!cleanLine.empty() && cleanLine.back() == ' '){
+        cleanLine.pop_back();
+    }
+    
+    if(!extractAlias(cleanLine, name, command)){
         cerr << "smash error: alias: invalid alias format" << endl;
         return;
     }
 
-    if(isReservedKeyword(name,aliasCommandsPtr)){
-        cerr << "smash error: alias:" << name << " already exists or is a reserved command" << endl;
+    if(isReservedKeyword(name,smash.getAliasCommands())){
+        cerr << "smash error: alias: " << name << " already exists or is a reserved command" << endl;
         return;
     }
 
-    aliasCommandsPtr->insert({name,command});
+    smash.getAliasCommands().push_back({name,command});
+}
+/// unalias:
+void unaliasCommand::execute() {
+    vector<string> words = splitLine(cmd_line);
+    SmallShell &smash = SmallShell::getInstance();
+    if(words.size()<2)
+    {
+        cerr << "smash error: unalias: not enough arguments" << endl;
+    }
+    int wsize = words.size();
+    for(int i=1;i<wsize;i++)
+    {
+        bool isCommand=false;
+        int size = smash.getAliasCommands().size();
+        for(int j=0;j<size;j++)
+        {
+            if(words[i] == smash.getAliasCommands()[j].first)
+            {
+                isCommand = true;
+                smash.getAliasCommands().erase(smash.getAliasCommands().begin()+j);
+                break;
+            }
+        }
+
+        if(!isCommand)
+        {
+            std::cerr<< "smash error: unalias: "<< words[i] <<" alias does not exist" <<std::endl;
+            return;
+        }
+    }
+    return;
+}
+
+/// Special:
+/// xxx >>> yyy
+void RedirectionCommand::execute() {
+    SmallShell &smash = SmallShell::getInstance();
+
+    // Split the line into before and after redirection
+    string before, after;
+    bool isDou = splitRedirection(cmd_line, before, after);
+
+    vector<string> afterWords = splitLine(after); // Split the after part
+	
+	if(afterWords.empty()){
+		afterWords.push_back("");
+		}
+    // Open the file for redirection
+    int file;
+    if (isDou) {
+        file = open(afterWords[0].c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+        if (file < 0) {
+            perror("smash error: open failed");
+            return;
+        }
+    } else {
+        file = open(afterWords[0].c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (file < 0) {
+            perror("smash error: open failed");
+            return;
+        }
+    }
+
+
+
+    // Save the original stdout
+    int saved_stdout = dup(1);
+    if (saved_stdout == -1) {
+        perror("smash error: dup failed");
+        close(file);
+        return;
+    }
+
+    // Redirect stdout to the file
+    if (dup2(file, 1) == -1) {
+        perror("smash error: dup2 failed");
+        close(file);
+        close(saved_stdout);
+        return;
+    }
+
+    close(file); // Close the original file descriptor, not needed anymore
+
+    // Execute the Command
+    Command *cmd = smash.CreateCommand(before);
+    cmd->execute();
+
+    // Restore the original stdout
+    if (dup2(saved_stdout, STDOUT_FILENO) == -1) {
+        perror("smash error: dup2 failed");
+    }
+    close(saved_stdout);
+}
+/// xxx |& yyy
+void PipeCommand::execute() {
+    SmallShell &smash = SmallShell::getInstance();
+    string cmd1,cmd2;
+    bool redirectStderr;
+    redirectStderr = pipeCommands(cmd_line,cmd1,cmd2);
+
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        perror("smash error: pipe failed");
+        return;
+    }
+
+    pid_t pid1 = fork();
+    if (pid1 == -1) {
+        perror("smash error: fork failed");
+        return;
+    }
+
+    if (pid1 == 0) { // Child process for command1
+        setpgrp(); /// change its group.
+        if (redirectStderr) {
+            if(dup2(pipefd[1], STDERR_FILENO) == -1){
+                perror("smash error: dup2 failed");
+            }
+        } else {
+            if(dup2(pipefd[1], STDOUT_FILENO) == -1){
+                perror("smash error: dup2 failed");
+            }
+        }
+        close(pipefd[0]);
+        close(pipefd[1]);
+
+        /// exe here
+        Command *cmd = smash.CreateCommand(cmd1);
+        if(cmd != nullptr){
+            cmd->execute();
+        }
+        exit(0);
+    }
+
+    pid_t pid2 = fork();
+    if (pid2 == -1) {
+        perror("smash error: fork failed");
+        return;
+    }
+
+    if (pid2 == 0) { // Child process for command2
+        setpgrp(); /// change its group.
+        dup2(pipefd[0], STDIN_FILENO); // Redirect pipe to stdin
+        close(pipefd[0]);
+        close(pipefd[1]);
+
+        /// exe here
+        Command *cmd = smash.CreateCommand(cmd2);
+        if(cmd != nullptr){
+            cmd->execute();
+        }
+        exit(0);
+    }
+
+    // Parent process
+    close(pipefd[0]);
+    close(pipefd[1]);
+
+    waitpid(pid1, nullptr, 0); // Wait for command1
+    waitpid(pid2, nullptr, 0); // Wait for command2
+}
+/// netinfo:
+void NetInfo::execute() {
+    vector<string> words = splitLine(cmd_line); /// split line
+    if (words.size() == 1) {
+        std::cerr << "smash error: netinfo: interface not specified" << std::endl;
+        return;
+    }
+    printNetworkInfo(words[1]);
+}
+/// whoami:
+void WhoAmICommand::execute() {
+    int fd = open("/etc/passwd", O_RDONLY);
+    if (fd == -1) {
+        perror("smash error: open failed");
+        return;
+    }
+
+    char buffer[1024];
+    int bytesRead;
+    string line;
+
+    while ((bytesRead = read(fd, buffer, sizeof(buffer) - 1)) > 0) {
+        buffer[bytesRead] = '\0';
+        for (int i = 0; i < bytesRead; ++i) {
+            if (buffer[i] == '\n') {
+                stringstream ss(line);
+                string username, password, uid, gid, fullname, home_dir, shell;
+
+                getline(ss, username, ':');
+                getline(ss, password, ':');
+                getline(ss, uid, ':');
+                getline(ss, gid, ':');
+                getline(ss, fullname, ':');
+                getline(ss, home_dir, ':');
+                getline(ss, shell, ':');
+
+                int x = stoi(uid);
+                int y = getuid();
+                if (x == y) {
+                    cout << username << " " << home_dir << std::endl;
+                    close(fd);
+                    return;
+                }
+
+                line.clear();
+            } else {
+                line += buffer[i];
+            }
+        }
+    }
+
+    if (bytesRead == -1) {
+        perror("smash error: read failed");
+    }
+
+    close(fd);
+}
+/// listdir:
+void ListDirCommand::execute() {
+
+    vector<string> words = splitLine(cmd_line);
+    if(words.size()!=2)
+    {
+        std::cerr<<"smash error: listdir: too many arguments"<<std::endl;
+    }
+    int x=0;
+    listDirectory(words[1],x);
+
 }
 
 /// ExternalCommand:
 void ExternalCommand::execute() {
+
     string command = cmd_line; /// not modify
-    vector<string> words = splitLine(cmd_line); /// split line
-    bool isBackground = false;
-    // Handle background execution
-    if (words[words.size()-1].back() == '&') {
-        words[words.size()-1].pop_back();
-        command = unsplitLine(words);
-        isBackground = true;
+
+    string cleanLine = cmd_line;
+    while (cleanLine.back() == ' '){
+        cleanLine.pop_back();
     }
+    if(cleanLine.back() == '&'){
+        cleanLine.pop_back();
+    }
+    vector<string> words = splitLine(cleanLine); /// split line
 
     pid_t pid = fork();
 
@@ -531,8 +1021,12 @@ void ExternalCommand::execute() {
         return;
     }
 
+    SmallShell &smash = SmallShell::getInstance();
+
     if (pid == 0) {
         /// Child process
+        setpgrp(); /// change its group.
+
         if (command.find('*') != string::npos || command.find('?') != string::npos) {
             /// Complex command: run using bash -c
             execl("/bin/bash", "bash", "-c", command.c_str(), nullptr);
@@ -546,28 +1040,28 @@ void ExternalCommand::execute() {
 
             execvp(c_args[0], c_args.data());
         }
-        perror("smash error: exec failed");
-        _exit(0);  // Child process exits here
+        perror("smash error: execvp failed");
+        exit(0);  // Child process exits here
     } else {
         /// Parent process
         if (isBackground) {
-            jobsPtr->addJob(cmd_line, pid, false);
+            if(smash.getShellJobs().jobs.size() == 0){
+                smash.getShellJobs().nextJobId = 1;
+            } else{
+                smash.getShellJobs().nextJobId = smash.getShellJobs().jobs.back().jobId + 1;
+            }
+            smash.getShellJobs().addJob(smash.getCurrent_command(), pid, false);
         } else {
             // Wait for child process to finish
+            smash.setFgPid(pid);
             if (waitpid(pid, nullptr, 0) == -1) {
                 perror("smash error: waitpid failed");
             }
+            smash.setFgPid(-1);
         }
     }
 }
 
-void unaliasCommand::execute() {
-    vector<string> words = splitLine(cmd_line);
-    if(words.size()<2)
-    {
-       std::cerr<<"smash error: unalias: not enough arguments"<<std::endl;
-    }
-}
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 /// Jobs Funcs:
@@ -590,13 +1084,19 @@ void JobsList::printJobsList(){
         cout << "[" << jobs[i].jobId << "] " << jobs[i].jobName << endl;
     }
 }
+void JobsList::printJobsListKill(){
+    for (size_t i = 0; i < jobs.size(); ++i) {
+        cout << jobs[i].jobPid << ": " << jobs[i].jobName << endl;
+    }
+}
 
 void JobsList::killAllJobs()
 {
-    cout << "sending SIGKILL signal to " << jobs.size() << " jobs:" << endl;
-    printJobsList();
+    cout << "smash: sending SIGKILL signal to " << jobs.size() << " jobs:" << endl;
+    printJobsListKill();
 
-    for (int i = 0; i < jobs.size(); i++) {
+    int size = jobs.size();
+    for (int i = 0; i < size; i++) {
         if (kill(jobs[i].jobPid, SIGKILL) == -1) {
             perror("smash error: kill failed");
         }
@@ -625,7 +1125,8 @@ void JobsList::removeFinishedJobs(){
 }
 
 JobsList::JobEntry *JobsList::getJobById(int jobId){
-    for (int i = 0; i < jobs.size(); i++) {
+    int size = jobs.size();
+    for (int i = 0; i < size; i++) {
         if (jobs[i].jobId == jobId) {
             return &(jobs[i]);
         }
@@ -634,8 +1135,9 @@ JobsList::JobEntry *JobsList::getJobById(int jobId){
 }
 
 void JobsList::removeJobById(int jobId){
-    int pid=0;
-    for(int i=0; i<jobs.size();i++){
+    int pid = 0;
+    int size = jobs.size();
+    for(int i=0; i<size; i++){
         if(jobs[i].jobId == jobId){
             pid = jobs[i].jobPid;
             jobs.erase(jobs.begin() + i);
@@ -677,11 +1179,35 @@ JobsList::JobEntry *JobsList::getLastStoppedJob(int *jobId){
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void SmallShell::executeCommand(const string cmd_line) {
-    Command* cmd = CreateCommand(cmd_line);
+    SmallShell &smash = SmallShell::getInstance();
+    smash.getCurrent_command() = cmd_line;
+    Command *cmd = CreateCommand(cmd_line);
+    shellJobs.removeFinishedJobs();
     if(cmd != nullptr){
-        shellJobsPtr->removeFinishedJobs();
         cmd->execute();
     }
-    /// Please note that you must fork smash process for some commands (e.g., external commands....)
-    /// done in the execute
+    smash.getCurrent_command() = "";
 }
+
+string& SmallShell::getSmashName(){
+    return smashName;
+}
+string& SmallShell::getCurrent_command(){
+    return current_command;
+}
+JobsList& SmallShell::getShellJobs(){
+    return shellJobs;
+}
+vector<pair<string,string>>& SmallShell::getAliasCommands(){
+    return aliasCommands;
+}
+string& SmallShell::getLastDirectory(){
+    return lastDirectory;
+}
+int& SmallShell::getFgPid(){
+    return fgPid;
+}
+void SmallShell::setFgPid(int x){
+    fgPid = x;
+}
+

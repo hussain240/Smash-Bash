@@ -2,23 +2,31 @@
 #define SMASH_COMMAND_H_
 
 #include <limits.h>
+#include <iostream>
 #include <memory>
 #include <algorithm>
 #include <unordered_map>
 #include <string>
 #include <vector>
 #include <regex>
+#include <fcntl.h>
+#include <cstring>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <cstdlib>
+#include <sys/stat.h>
+#include <sstream>
 
 using namespace std;
 class JobsList;
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
 
-
-vector<string> splitLine(const string& line);
-string unsplitLine(const vector<string>& words);
-int checkIfLegalSIGNAL(const std::string& str);
-int stringToInt(const std::string& str);
 
 class Command {
 public:
@@ -45,22 +53,10 @@ public:
 
 class ExternalCommand : public Command {
 public:
-    shared_ptr<JobsList> jobsPtr;
-    ExternalCommand(const string cmd_line, shared_ptr<JobsList> jobsPtr);
+    bool isBackground;
+    ExternalCommand(const string cmd_line,bool is);
 
     virtual ~ExternalCommand() {
-    }
-
-    void execute() override;
-}; /// done
-
-/*
-class PipeCommand : public Command {
-    // TODO: Add your data members
-public:
-    PipeCommand(const char *cmd_line);
-
-    virtual ~PipeCommand() {
     }
 
     void execute() override;
@@ -69,20 +65,29 @@ public:
 class RedirectionCommand : public Command {
     // TODO: Add your data members
 public:
-    explicit RedirectionCommand(const char *cmd_line);
+    explicit RedirectionCommand(const string cmd_lineP);
 
     virtual ~RedirectionCommand() {
     }
 
     void execute() override;
 };
-*/
+
+class PipeCommand : public Command {
+    // TODO: Add your data members
+public:
+    PipeCommand(const string cmd_lineP);
+
+    virtual ~PipeCommand() {
+    }
+
+    void execute() override;
+};
 
 class ChangeDirCommand : public BuiltInCommand {
 public:
-    shared_ptr<string> lastPathPtr; /// the last so we can go if "cd -"
 
-    ChangeDirCommand(string cmdLine, shared_ptr<string> pLastPwd); /// Constructor
+    ChangeDirCommand(string cmdLine); /// Constructor
 
     virtual ~ChangeDirCommand() {}
 
@@ -115,8 +120,7 @@ class JobsList;
 class QuitCommand : public BuiltInCommand {
     // TODO: Add your data members public:
 public:
-    shared_ptr<JobsList>jobsPtr;
-    QuitCommand(const string cmd_line,shared_ptr<JobsList> shellJobsPtrP);
+    QuitCommand(const string cmd_line);
 
     virtual ~QuitCommand() {
     }
@@ -143,6 +147,7 @@ public:
     void addJob(string cmd_line, int pid, bool isStopped = false);
 
     void printJobsList();
+    void printJobsListKill();
 
     void killAllJobs();
 
@@ -160,8 +165,7 @@ public:
 
 class JobsCommand : public BuiltInCommand {
 public:
-    shared_ptr<JobsList> jobsPtr;
-    JobsCommand(const string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP);
+    JobsCommand(const string cmd_lineP);
 
     virtual ~JobsCommand(){}
 
@@ -172,8 +176,7 @@ public:
 class KillCommand : public BuiltInCommand {
     // TODO: Add your data members
 public:
-    shared_ptr<JobsList> jobsPtr;
-    KillCommand(const string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP);
+    KillCommand(const string cmd_lineP);
 
     virtual ~KillCommand() {
     }
@@ -183,8 +186,7 @@ public:
 
 class ForegroundCommand : public BuiltInCommand {
 public:
-    shared_ptr<JobsList> jobsPtr;
-    ForegroundCommand(const string cmd_lineP, shared_ptr<JobsList> shellJobsPtrP);
+    ForegroundCommand(const string cmd_lineP);
 
     virtual ~ForegroundCommand() {
     }
@@ -194,10 +196,7 @@ public:
 
 class aliasCommand : public BuiltInCommand {
 public:
-    shared_ptr<unordered_map<string, string>> aliasCommandsPtr;
-
-    aliasCommand(const string cmd_line, shared_ptr<JobsList> shellJobsPtrP,
-                 shared_ptr<unordered_map<string, string>> aliasCommandsPtr);
+    aliasCommand(const string cmd_line);
 
     virtual ~aliasCommand() {
     }
@@ -205,21 +204,15 @@ public:
     void execute() override;
 };
 
-
 class unaliasCommand : public BuiltInCommand {
 public:
-    shared_ptr<unordered_map<string, string>> aliasCommandsPtr;
-    const std::string cmd_line;
-    shared_ptr <JobsList> shellJobsPtrP;
-    unaliasCommand(shared_ptr<unordered_map<string, string>> aliasCommandsPtr,
-    const std::string cmd_line,shared_ptr <JobsList> shellJobsPtrP);
+    unaliasCommand(const string cmd_lineP);
 
     virtual ~unaliasCommand() {
     }
 
     void execute() override;
 };
-/*
 
 class ListDirCommand : public Command {
 public:
@@ -244,23 +237,25 @@ public:
 class NetInfo : public Command {
     // TODO: Add your data members
 public:
-    NetInfo(const string cmd_line);
+    NetInfo(const string cmd_lineP);
 
     virtual ~NetInfo() {
     }
 
     void execute() override;
 };
-*/
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///Main class (SmallShell):
 
 class SmallShell {
 private:
-    shared_ptr<JobsList> shellJobsPtr; /// for background
-    shared_ptr<unordered_map<string, string>> aliasCommandsPtr; /// new defined commands (allies)
-    shared_ptr<string> lastDirectory;
+    string smashName;
+    string current_command;
+    JobsList shellJobs; /// for background
+    vector<pair<string,string>> aliasCommands; /// new defined commands (allies)
+    string lastDirectory;
+    int fgPid;
     SmallShell();
 
 public:
@@ -274,6 +269,14 @@ public:
         // Instantiated on first use.
         return instance;
     }
+
+    string& getSmashName();
+    string& getCurrent_command();
+    vector<pair<string,string>>& getAliasCommands();
+    string& getLastDirectory();
+    JobsList& getShellJobs();
+    int& getFgPid();
+    void setFgPid(int x);
 
     ~SmallShell();
 
